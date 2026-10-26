@@ -4,3 +4,5 @@ uvicorn[standard]
 sqlalchemy
 pymysql
 python-dotenv
+groq
+sqlglot
