@@ -42,7 +42,6 @@ def validate_remote_host(host: str) -> str:
             detail="Enter a hostname or IP address, not a URL.",
         )
 
-    # Reject IP addresses that are not globally routable.
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
@@ -83,9 +82,7 @@ def validate_remote_host(host: str) -> str:
             detail="Enter a valid public database hostname.",
         )
 
-    # Initial SSRF protection: reject hostnames resolving to
-    # non-public IP addresses. Production deployments also need
-    # network-level egress restrictions and DNS-rebinding protection.
+    # Initial SSRF protection. This alone does not prevent DNS rebinding.
     try:
         addresses = socket.getaddrinfo(
             hostname,
@@ -106,15 +103,11 @@ def validate_remote_host(host: str) -> str:
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    "The database hostname resolved to "
-                    "an invalid IP address."
-                ),
+                detail="The database hostname resolved to an invalid IP address.",
             )
 
     if not resolved_ips or any(
-        not resolved_ip.is_global
-        for resolved_ip in resolved_ips
+        not resolved_ip.is_global for resolved_ip in resolved_ips
     ):
         raise HTTPException(
             status_code=400,
@@ -133,8 +126,6 @@ def validate_connection_details(
     """Validate the submitted MySQL connection details."""
     validate_remote_host(request.host)
 
-    # Custom ports are required by some cloud database providers.
-    # The Pydantic model already restricts the port to 1–65535.
     if not 1 <= request.port <= 65535:
         raise HTTPException(
             status_code=400,
@@ -163,16 +154,13 @@ def validate_connection_details(
         )
 
 
-
 def build_mysql_engine(request: MySQLConnectionRequest):
     """Build a MySQL engine with verified TLS."""
     backend_dir = Path(__file__).resolve().parent.parent
 
     ca_setting = os.getenv("MYSQL_SSL_CA", "").strip()
-
     tls_context = ssl.create_default_context()
 
-    # Also trust the custom CA, if one is configured.
     if ca_setting:
         ca_file = Path(ca_setting).expanduser()
 
@@ -187,7 +175,6 @@ def build_mysql_engine(request: MySQLConnectionRequest):
 
         tls_context.load_verify_locations(cafile=str(ca_file))
 
-    # Always verify the server certificate and its hostname.
     tls_context.verify_mode = ssl.CERT_REQUIRED
     tls_context.check_hostname = True
 
@@ -211,7 +198,6 @@ def build_mysql_engine(request: MySQLConnectionRequest):
     )
 
 
-
 @router.post("/test")
 def test_mysql_connection(request: MySQLConnectionRequest):
     validate_connection_details(request)
@@ -225,7 +211,7 @@ def test_mysql_connection(request: MySQLConnectionRequest):
         with user_engine.connect() as connection:
             connection.execute(text("SELECT 1"))
 
-        # Discover the available tables.
+        # Discover available tables.
         inspector = inspect(user_engine)
         table_names = sorted(inspector.get_table_names())
 
@@ -275,11 +261,9 @@ def test_mysql_connection(request: MySQLConnectionRequest):
         raise
 
     except (SQLAlchemyError, OSError, ssl.SSLError) as exc:
-        # Log the detailed exception on the server for debugging,
-        # but do not expose credentials or internal details to clients.
+        # Log the exception type only, not the raw message.
         print(
-            f"MySQL connection test failed: "
-            f"{type(exc).__name__}: {exc}"
+            f"MySQL connection test failed: {type(exc).__name__}"
         )
 
         raise HTTPException(
