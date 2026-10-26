@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from pydantic import BaseModel, Field
 from fastapi.encoders import jsonable_encoder
 import socket
+import os
 
 from app.ai_service import generate_sql
 from app.sql_validator import validate_sql, SQLValidationError
@@ -31,11 +32,17 @@ class AskRequest(BaseModel):
     connection: MySQLConnectionRequest
 
 
+cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
+        origin.strip().rstrip("/")
+        for origin in cors_origins.split(",")
+        if origin.strip()
     ],
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
